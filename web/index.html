@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title></title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="join">
+      <form id="join-form" autocomplete="off">
+        <h1 id="title"></h1>
+        <label><span id="room-label"></span><input id="room" maxlength="12" required /></label>
+        <label><span id="name-label"></span><input id="name" maxlength="16" required /></label>
+        <button id="join-button" type="submit"></button>
+        <p id="help"></p>
+        <p id="join-error"></p>
+      </form>
+    </div>
+    <div id="game" hidden>
+      <div id="stage"></div>
+      <div id="labels"></div>
+      <pre id="debug"></pre>
+      <div id="banner" hidden></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

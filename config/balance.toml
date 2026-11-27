@@ -1,0 +1,55 @@
+# 수치 원본입니다. design.md 12절의 시작값을 옮겼고, 플레이테스트 내내 바뀝니다.
+# 단위: 거리 m, 시간 s, 속도 m/s, 가속도 m/s². 틱 단위 환산은 불러올 때 한 번만 합니다.
+# 아직 쓰지 않는 수치는 그 규칙을 만드는 마일스톤에서 추가합니다.
+# 서버는 방을 새로 만들 때마다 이 파일을 다시 읽습니다. 고친 값은 다음에 만들어지는 방부터 적용됩니다.
+
+[sim]
+tick_rate = 30              # 초당 틱 수
+
+[round]
+survivor_count = 3          # 방 정원은 생존자 수 + 살인마 1명
+
+[survivor]
+run_speed = 4.0             # M0에서는 모든 캐릭터가 이 속도로 움직입니다
+radius = 0.35               # M0에서는 모든 캐릭터가 이 반지름입니다
+
+[common]
+acceleration = 40.0         # 목표 속도를 향해 속도가 바뀌는 빠르기
+
+[objective]
+point_count = 6             # 맵에 있어야 하는 목표 지점(O) 수
+
+[restraint]
+point_count = 4             # 맵에 있어야 하는 구속 지점(R) 수
+
+[respawn]
+point_count = 4             # 맵에 있어야 하는 생존자 시작·리스폰 지점(S) 수
+
+[camera]
+view_height = 24.0          # 화면에 보이는 세계 높이
+max_aspect_w = 16.0         # 최대 가로세로 비 (가로)
+max_aspect_h = 9.0          # 최대 가로세로 비 (세로)
+
+# ---- 네트워크 (서버) ----
+[net]
+input_buffer_target = 3     # 서버가 플레이어 입력을 쓰기 시작하기 전에 쌓아 두는 입력 수. 도착 시각의 흔들림(망 + 클라이언트 프레임)을 흡수합니다
+input_buffer_grow_max = 4   # 입력이 늦게 와서 직전 입력을 대신 쓰게 되면 버퍼를 늘리는데, 그 상한 (틱)
+input_buffer_shrink_after = 10.0  # 대신 쓰기가 이 시간 동안 없으면 늘렸던 버퍼를 한 칸씩 되돌립니다
+input_max_per_tick = 2      # 대기열이 목표보다 길 때 한 틱에 쓸 수 있는 최대 입력 수
+input_max_substitute = 4    # 대기열이 비었을 때 직전 입력을 대신 쓰는 최대 연속 틱 수. 넘으면 멈춤으로 바꾸고 버퍼를 다시 채웁니다
+input_drift_allowance = 0.01  # 실제 시간보다 빨리 쓸 수 있는 입력의 비율 (클라이언트 시계가 조금 빠를 때 따라잡을 여유)
+input_burst = 2.0           # 쓰지 않고 모아 둘 수 있는 입력 소비 여유분의 상한 (틱)
+input_queue_max = 30        # 플레이어별 입력 대기열 최대 길이. 넘으면 오래된 것부터 버립니다
+max_catchup_ticks = 5       # 서버 틱 루프가 밀렸을 때 한 번에 따라잡는 틱 수의 상한
+max_message_bytes = 2048    # 클라이언트 메시지 하나의 최대 크기
+max_messages_per_second = 120  # 연결 하나가 1초에 보낼 수 있는 메시지 수. 넘으면 연결을 끊습니다
+join_timeout = 5.0          # 연결 뒤 입장 메시지를 기다리는 시간
+
+# ---- 클라이언트 (예측, 보정, 보간) ----
+[client]
+interp_delay = 0.1          # 다른 캐릭터를 이만큼 과거의 서버 상태로 보간해 그립니다
+correction_smoothing = 0.1  # 작은 예측 오차를 화면에서 나눠 맞추는 시간 상수
+correction_snap = 1.0       # 예측 오차가 이보다 크면 화면 위치를 즉시 맞춥니다 (m)
+max_catchup_ticks = 8       # 프레임이 밀렸을 때 한 번에 진행하는 예측 틱 수의 상한
+max_pending_inputs = 120    # 서버 확인을 기다리는 입력의 최대 보관 수
+ping_interval = 0.5         # 지연 측정 메시지를 보내는 간격

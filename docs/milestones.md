@@ -1,6 +1,6 @@
 # 마일스톤
 
-**현재 상태: M0 시작 전** (작업 세션이 끝날 때마다 이 줄과 체크박스, 맨 아래 진행 기록을 고칩니다)
+**현재 상태: M0 작업과 자동 확인 완료, 사용자의 사람 확인 대기** (작업 세션이 끝날 때마다 이 줄과 체크박스, 맨 아래 진행 기록을 고칩니다)
 
 첫 플레이 가능 버전이 답해야 할 질문은 하나입니다. "공유 목숨 풀, 리스폰, 구출이 네 명(살인마 1, 생존자 3)이 할 때 재미있는가." 이 질문에 답하는 데 필요 없는 것은 만들지 않습니다.
 
@@ -18,19 +18,19 @@
 **목적:** 서버 권위 구조에서 이동이 지연 속에서도 매끄러운지 확인합니다. 이후의 모든 것이 이 위에 올라가므로, 여기서는 게임 규칙보다 구조를 바르게 잡는 것이 중요합니다.
 
 **작업**
-- [ ] Rust 툴체인 설치(`rustup`), `rust-toolchain.toml`(stable, `wasm32-unknown-unknown` 타깃, `rustfmt`, `clippy`)
-- [ ] git 저장소 초기화, `.gitignore`(`target`, `node_modules`, `var`, 빌드 결과), `core.fileMode false`
-- [ ] 환경 준비 스크립트: Cargo의 `target`을 WSL 홈 아래에 만들고 저장소에는 심볼릭 링크를 둠 (architecture.md 7절)
-- [ ] Cargo 워크스페이스와 크레이트 다섯 개(`shared`, `client-core`, `client-wasm`, `server`, `tools`)의 뼈대, 브라우저 껍데기 `web/`의 뼈대
-- [ ] 전체 검사 스크립트 (architecture.md 8절의 구성)
-- [ ] `config/balance.toml`과 범위 검증 로더 (M0에 필요한 수치부터)
-- [ ] 맵 텍스트 형식의 로더와 검증 (design.md 4절의 글자 전부 인식), 벽이 몇 개 있는 작은 시험용 맵
-- [ ] `shared`: 캐릭터 이동과 지형 충돌(`step_character`), 시드 난수, 상태 해시, 프로토콜 타입
-- [ ] `server`: 방 코드 입장, 방마다 태스크 하나인 고정 틱 루프, 입력 대기열과 검증, 매 틱 상태 전송, 연결별 지연 주입 옵션, 정적 파일 제공
-- [ ] `client-core`: 서버 메시지 해석, 자기 예측과 보정, 타인 보간, 서버 시각 추정, 화면에 그릴 상태 만들기
-- [ ] `client-wasm`과 `web`: WebAssembly 빌드와 연결, 방 코드와 이름을 넣는 접속 화면, 맵과 캐릭터 그리기, 입력 수집, 디버그 표시(왕복 지연, 보정 크기)
-- [ ] `tools`: 화면 없는 테스트 클라이언트 (`client-core`를 네이티브로 써서 무작위로 움직이며 예측 오차를 기록)
-- [ ] `CLAUDE.md`의 명령어 절 채우기
+- [x] Rust 툴체인 설치(`rustup`), `rust-toolchain.toml`(stable, `wasm32-unknown-unknown` 타깃, `rustfmt`, `clippy`)
+- [x] git 저장소 초기화, `.gitignore`(`target`, `node_modules`, `var`, 빌드 결과), `core.fileMode false`
+- [x] 환경 준비 스크립트: Cargo의 `target`을 WSL 홈 아래에 만들고 저장소에는 심볼릭 링크를 둠 (architecture.md 7절)
+- [x] Cargo 워크스페이스와 크레이트 다섯 개(`shared`, `client-core`, `client-wasm`, `server`, `tools`)의 뼈대, 브라우저 껍데기 `web/`의 뼈대
+- [x] 전체 검사 스크립트 (architecture.md 8절의 구성)
+- [x] `config/balance.toml`과 범위 검증 로더 (M0에 필요한 수치부터)
+- [x] 맵 텍스트 형식의 로더와 검증 (design.md 4절의 글자 전부 인식), 벽이 몇 개 있는 작은 시험용 맵
+- [x] `shared`: 캐릭터 이동과 지형 충돌(`step_character`), 시드 난수, 상태 해시, 프로토콜 타입
+- [x] `server`: 방 코드 입장, 방마다 태스크 하나인 고정 틱 루프, 입력 대기열과 검증, 매 틱 상태 전송, 연결별 지연 주입 옵션, 정적 파일 제공
+- [x] `client-core`: 서버 메시지 해석, 자기 예측과 보정, 타인 보간, 서버 시각 추정, 화면에 그릴 상태 만들기
+- [x] `client-wasm`과 `web`: WebAssembly 빌드와 연결, 방 코드와 이름을 넣는 접속 화면, 맵과 캐릭터 그리기, 입력 수집, 디버그 표시(왕복 지연, 보정 크기)
+- [x] `tools`: 화면 없는 테스트 클라이언트 (`client-core`를 네이티브로 써서 무작위로 움직이며 예측 오차를 기록)
+- [x] `CLAUDE.md`의 명령어 절 채우기
 
 **범위 밖:** 시야, 공격, 역할 구분, 대기실 기능, 봇. 이 단계의 캐릭터는 모두 같은 속도로 움직이는 원입니다.
 
@@ -153,4 +153,29 @@ Rust와 TypeScript의 경계(architecture.md 5절)는 이 단계에서 굳습니
 - 사용자가 확인하거나 정해야 할 것:
 ```
 
-(아직 기록 없음)
+### 2026-11-28 (M0)
+- 한 일:
+  - Rust 1.100.0 설치(rustup, `rust-toolchain.toml`로 고정, wasm32 타깃, rustfmt, clippy). git 초기화. 원래 checkout에는 설계 문서만 첫 커밋(`설계 문서`)으로 두고, M0 작업은 worktree `.claude/worktrees/m0-network-skeleton`의 브랜치 `worktree-m0-network-skeleton`에서 커밋함(백그라운드 세션의 작업 격리 규칙 때문). main에 합치는 것은 사용자가 정함.
+  - 크레이트 다섯 개와 `web/`, 스크립트(`setup.sh`, `check.sh`, `run.sh`, `build-wasm.sh`, `build-web.sh`, `wasm-determinism.mjs`, `wasm-smoke.mjs`), `config/balance.toml`과 범위 검증, 맵 로더와 검증, `maps/test.txt`(32×20).
+  - `shared`: `step_character`(가속, 원–타일 충돌과 미끄러짐, 부분 이동으로 터널링 방지), `step`, `create_round`, `view_for`(M0는 전부 보임), `hash_state`, PCG32, 프로토콜 타입과 인코딩, 결정론 시나리오.
+  - `server`: 방 코드 입장, 방마다 태스크 하나인 30Hz 틱 루프(밀린 틱 따라잡기 상한), 플레이어별 입력 대기열(칸 대신 쓰기, 버퍼 자동 조절, 소비 여유분 상한), 매 틱 상태 전송, 연결별 지연 주입, 정적 파일, `TCP_NODELAY`.
+  - `client-core`: 메시지 해석, 자기 예측과 보정(화면 오프셋), 타인 보간(적응형 재생 시각), 서버 시각과 서버 틱 속도 추정, 카메라와 그릴 상태, 디버그 수치. `client-wasm`과 `web`: 접속 화면, PixiJS 그리기, 입력 수집, 디버그 표시.
+  - `tools`: `soak`(화면 없는 시험), `bots`(떠 있는 서버에 봇 넣기), `determinism`.
+  - `docs/decisions.md` 작성, `architecture.md` 7절에 이번에 잰 사실 추가, `CLAUDE.md` 명령어·환경 절.
+- 자동 확인 결과: 2026-11-28 01:15 `bash scripts/check.sh` 12개 항목 전부 통과.
+  - 산출물 `target -> ~/.cache/undying-rite/target (ext4)`. 단위 테스트 45개(shared 19 + 이동 7, client-core 9, server 10).
+  - 네이티브와 WebAssembly(Node) 3000틱 해시 일치: `final=397af97e1e1109b5 trace=5c7fee303d9d6bee`.
+  - 화면 없는 시험 60초, 150±30ms: 4개 모두 끊김·오류 없음, 예측 오차 최대 0.0000cm(표본 7183개), 서버 틱 처리 중앙 0.198ms / 최대 4.5ms, 틱 간격 중앙 33.28ms / p99 35.9ms / 최대 50.8ms. 입력 두 배 클라이언트 거리 비율 1.0124. 시계 ±2.5% 클라이언트도 오차 0, 넘친 입력 0.
+  - 같은 날 01:15 이전의 전체 검사 세 번은 실패했음: 첫 번째는 포맷과 입력 대기열 테스트(버퍼 기본값을 3으로 바꾼 뒤 테스트가 2를 전제) — 고침. 두 번째와 세 번째는 Windows 쪽 부하로 WSL이 CPU를 약 10%만 받던 때라 화면 없는 시험의 예측 오차(최대 8.9~26.7cm)와 연기 시험의 왕복 지연 항목이 실패함. 서버 틱 간격 최대 0.2~2.5초, 클라이언트 프레임 간격 최대 0.2~0.5초였음.
+  - 브라우저 확인(자동, Windows Edge headless + 개발자 도구 프로토콜로 키 입력): 맵, 자기 캐릭터, 다른 캐릭터, 이름표, 디버그 표시가 그려지고 키를 누르면 움직임. 150±30ms 주입, 20초 뒤: 예측 오차 0, 보간 멈춤 0.1%, 상대 그리기 지연 170ms, 확인 대기 입력 6개.
+- 남은 일: M0 사람 확인 세 가지 (사용자).
+- 알려진 문제:
+  - 이 기기에서는 Windows 쪽이 바쁘면 시간 기반 시험(화면 없는 시험, 연기 시험의 왕복 지연)이 실패함. 화면 없는 시험은 이때 `[경고]`를 붙임 (CLAUDE.md 환경 절).
+  - WSL 시계가 Windows보다 2.5~3.4% 느림. `client-core`가 서버 틱 속도를 재서 맞추지만, 접속 직후 2초 동안은 명목값을 써서 몇 틱 어긋날 수 있음.
+  - 브라우저 화면은 headless로만 확인함. 실제 창에서의 조작감, 60Hz 이상 모니터에서의 부드러움은 확인하지 않았음.
+  - 서버 로그의 퇴장 사유가 가끔 "보내기 실패"로 찍힘. 연결이 먼저 닫혀 방의 송신이 실패한 경우이고 동작에는 문제가 없음.
+- 사용자가 확인하거나 정해야 할 것:
+  - M0 사람 확인 세 가지 (확인 방법은 CLAUDE.md 명령어 절).
+  - worktree 브랜치를 main에 합칠지: `git -C /mnt/e/undying-rite merge --ff-only worktree-m0-network-skeleton`.
+  - `docs/decisions.md`의 M0 결정들, 특히 입력 버퍼 시작값 3틱(다른 사람에게 내 움직임이 100ms 늦게 보임)과 클라이언트가 서버 틱 속도에 맞추는 방식.
+  - git 작성자를 이 저장소에만 로컬로 설정했음(이름 `roax`, 이메일은 GitHub noreply 주소). 다르게 쓰려면 `git config user.name`/`user.email`.

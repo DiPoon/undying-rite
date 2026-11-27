@@ -1,0 +1,112 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: #000;
+  color: #e8e8e8;
+  font-family: system-ui, 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+  overflow: hidden;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+#join {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+#join-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 280px;
+}
+
+#join-form h1 {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+#join-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+#join-form input,
+#join-form button {
+  font: inherit;
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid #555;
+  background: #1a1d22;
+  color: inherit;
+}
+
+#join-form button {
+  cursor: pointer;
+  background: #2f4f7f;
+}
+
+#help {
+  font-size: 13px;
+  color: #aaa;
+}
+
+#join-error {
+  color: #ff8080;
+  min-height: 1.2em;
+}
+
+#game,
+#stage {
+  position: absolute;
+  inset: 0;
+}
+
+#labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: 12px;
+  white-space: nowrap;
+  text-shadow: 0 0 3px #000;
+}
+
+.label.self {
+  color: #f2c14e;
+}
+
+#debug {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  background: rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+#banner {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  transform: translate(-50%, -50%);
+  padding: 12px 16px;
+  background: rgba(0, 0, 0, 0.8);
+  border: 1px solid #555;
+  border-radius: 4px;
+}
