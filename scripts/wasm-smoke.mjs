@@ -72,7 +72,8 @@ for (const r of [a, b]) {
   check(other !== undefined && other.name === (r.name === '가' ? '나' : '가'), `${r.name}: 상대(${other?.name ?? '없음'})가 보임`);
   check(me !== undefined && rs.camera !== null, `${r.name}: 자기 캐릭터와 카메라가 있음`);
   const rtt = rs?.debug.rtt_ms ?? 0;
-  check(rtt >= 80 && rtt <= 200, `${r.name}: 주소로 준 지연이 적용됨 (왕복 ${rtt.toFixed(0)}ms, 기대 100±20)`);
+  // 주입은 왕복 100±20ms이고, 처리 지연을 감안해 80~200ms면 주소의 지연이 적용된 것으로 봅니다.
+  check(rtt >= 80 && rtt <= 200, `${r.name}: 주소로 준 지연이 적용됨 (왕복 ${rtt.toFixed(0)}ms, 주입 100±20, 판정 80~200)`);
   check((rs?.debug.recent_max_error_cm ?? 1) <= 1, `${r.name}: 최근 최대 예측 오차 ${rs?.debug.recent_max_error_cm.toFixed(4)}cm`);
 }
 const aMe = a.rs?.characters.find((c) => c.is_self);

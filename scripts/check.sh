@@ -57,14 +57,20 @@ determinism() {
 # web/의 TypeScript에는 이동, 충돌, 시야, 판정, 타이머 계산이 없어야 합니다.
 # 수학 함수를 부르는 줄이 생기면 규칙이 두 벌이 되기 시작한 신호이므로 막습니다. (wasm-bindgen 출력은 제외)
 web_boundary() {
-  local hits
-  hits="$(rg -n --glob '!wasm/**' -e 'Math\.' -e '\b(atan2|sqrt|hypot|sin|cos|tan)\s*\(' -e 'setInterval|setTimeout' web/src || true)"
-  if [ -n "$hits" ]; then
-    echo "web/src에 계산이나 타이머가 있습니다. 이 계산은 Rust(client-core)로 옮겨야 합니다:"
-    echo "$hits"
-    return 1
-  fi
-  echo "web/src에 Math.*, 삼각함수, 타이머 호출 없음"
+  command -v rg >/dev/null || { echo "rg(ripgrep)가 없어 검사할 수 없습니다."; return 1; }
+  local hits rc
+  hits="$(rg -n --glob '!wasm/**' -e 'Math\.' -e '\b(atan2|sqrt|hypot|sin|cos|tan)\s*\(' -e 'setInterval|setTimeout' web/src)"
+  rc=$?
+  # rg는 찾으면 0, 못 찾으면 1, 오류(잘못된 패턴, 경로 없음)면 2를 돌려줍니다.
+  case $rc in
+    0)
+      echo "web/src에 계산이나 타이머가 있습니다. 이 계산은 Rust(client-core)로 옮겨야 합니다:"
+      echo "$hits"
+      return 1
+      ;;
+    1) echo "web/src에 Math.*, 삼각함수, 타이머 호출 없음" ;;
+    *) echo "rg가 실패했습니다 (종료 코드 $rc)."; return 1 ;;
+  esac
 }
 
 # 실제 서버 실행 파일을 빈 포트에 띄우고, 브라우저와 같은 WebAssembly 빌드로 두 클라이언트를 접속시킵니다.

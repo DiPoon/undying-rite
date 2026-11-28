@@ -10,6 +10,7 @@ export const S = {
   connecting: '연결 중…',
   disconnected: '서버와 연결이 끊어졌습니다. 새로고침하면 다시 들어갈 수 있습니다.',
   loadFailed: 'WebAssembly를 불러오지 못했습니다.',
+  rendererFailed: '화면을 그릴 준비를 하지 못했습니다 (WebGL을 쓸 수 없을 수 있습니다).',
 
   joinError: {
     bad_room_code: '방 코드는 영문자와 숫자 1~12자입니다.',

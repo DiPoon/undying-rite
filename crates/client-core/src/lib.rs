@@ -147,6 +147,10 @@ impl Client {
 
     /// 서버가 보낸 메시지 하나를 처리합니다. 해석하지 못한 메시지는 세고 버립니다.
     pub fn on_message(&mut self, text: &str, now_ms: f64) -> Result<(), String> {
+        // 유한하지 않은 시각이 세션에 들어가면 도착 기록과 재생 시각이 NaN에 머물러 되돌아오지 않습니다.
+        if !now_ms.is_finite() {
+            return Err(format!("시각 값이 유한하지 않습니다: {now_ms}"));
+        }
         let msg = match protocol::decode_server(text) {
             Ok(m) => m,
             Err(e) => {
@@ -273,13 +277,15 @@ impl Client {
 
     /// 시간을 진행합니다. 로컬 틱마다 입력을 만들어 예측하고, 보낼 메시지를 돌려줍니다.
     pub fn update(&mut self, now_ms: f64) -> Vec<String> {
-        let dt = match self.last_now {
-            Some(last) if now_ms.is_finite() => (now_ms - last).max(0.0),
-            _ => 0.0,
-        };
-        if now_ms.is_finite() {
-            self.last_now = Some(now_ms);
+        // 유한하지 않은 시각은 이 프레임을 건너뜁니다. 보낼 메시지는 다음 정상 호출 때 나갑니다.
+        if !now_ms.is_finite() {
+            return Vec::new();
         }
+        let dt = match self.last_now {
+            Some(last) => (now_ms - last).max(0.0),
+            None => 0.0,
+        };
+        self.last_now = Some(now_ms);
         if dt > 0.0 {
             self.frame_ms = Some(match self.frame_ms {
                 None => dt,
@@ -631,6 +637,33 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn non_finite_time_never_reaches_the_session() {
+        let balance = include_str!("../../../config/balance.toml");
+        let map = include_str!("../../../maps/test.txt");
+        let welcome = protocol::encode(&ServerMsg::Welcome {
+            protocol: PROTOCOL_VERSION,
+            player_id: PlayerId(1),
+            room: "T".into(),
+            balance: balance.into(),
+            map: map.into(),
+        })
+        .unwrap();
+        let mut c = Client::new();
+        c.on_message(&welcome, 0.0).unwrap();
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(c.update(bad).is_empty());
+            assert!(c.on_message(&welcome, bad).is_err());
+        }
+        // 정상 시각으로 돌아오면 핑이 나가고, 그 핑의 시각은 유한합니다.
+        let out = c.update(10.0);
+        assert!(
+            out.iter()
+                .any(|m| m.contains(r#""type":"ping","client_time":10.0"#)),
+            "{out:?}"
+        );
+    }
 
     #[test]
     fn fallback_render_json_has_every_field_of_render_state() {

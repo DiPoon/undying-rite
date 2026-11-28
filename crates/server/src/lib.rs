@@ -107,8 +107,15 @@ impl AppState {
         &self.0.net
     }
 
+    /// 방을 만들 때 설정과 맵을 다시 읽습니다. 연결의 메시지 수 한도는 서버를 띄울 때의 값이므로,
+    /// 새 설정의 정상 송신량이 그 한도 안에 드는지도 확인합니다.
     pub fn load_setup(&self) -> Result<Setup, String> {
-        Setup::load(&self.0.opts.config_path, &self.0.opts.map_path)
+        let setup = Setup::load(&self.0.opts.config_path, &self.0.opts.map_path)?;
+        setup
+            .cfg
+            .check_message_limit(self.0.net.max_messages_per_second)
+            .map_err(|e| format!("{e}. 연결 한도는 서버를 다시 띄워야 바뀝니다"))?;
+        Ok(setup)
     }
 
     pub fn next_id(&self) -> u64 {

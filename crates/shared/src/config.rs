@@ -192,7 +192,9 @@ impl BalanceConfig {
             0.0,
             0.2,
         );
-        c.f("net.input_burst", n.input_burst, 1.0, 30.0);
+        // 한 틱에 입력을 둘 쓰려면 여유분이 입력 두 개분은 모여야 합니다. 2보다 작으면 따라잡기가 사라져서
+        // 클라이언트 시계가 조금만 빨라도 대기열이 넘칩니다.
+        c.f("net.input_burst", n.input_burst, 2.0, 30.0);
         c.u("net.input_queue_max", n.input_queue_max, 1, 1000);
         if n.input_queue_max < n.input_buffer_target {
             c.0.push(format!(
@@ -259,16 +261,8 @@ impl BalanceConfig {
             ));
         }
         c.f("client.rate_max_deviation", cl.rate_max_deviation, 0.0, 0.2);
-        // 정상 클라이언트가 보내는 양(틱마다 입력 하나, 서버 틱 속도 보정으로 최대 rate_max_deviation만큼 더,
-        // 거기에 지연 측정)보다 메시지 수 제한이 넉넉해야 합니다. 그렇지 않으면 모든 연결이 곧바로 끊깁니다.
-        let normal =
-            f64::from(self.sim.tick_rate) * (1.0 + cl.rate_max_deviation) + 1.0 / cl.ping_interval;
-        let required = libm::ceil(normal * MESSAGE_RATE_MARGIN);
-        if f64::from(n.max_messages_per_second) < required {
-            c.0.push(format!(
-                "net.max_messages_per_second = {}가 정상 클라이언트의 초당 메시지 수({:.1})에 여유를 둔 {}보다 작습니다",
-                n.max_messages_per_second, normal, required
-            ));
+        if let Err(m) = self.check_message_limit(n.max_messages_per_second) {
+            c.0.push(m);
         }
         if c.0.is_empty() {
             Ok(())
@@ -280,6 +274,27 @@ impl BalanceConfig {
     /// 방 정원. 살인마는 언제나 1명입니다.
     pub fn room_capacity(&self) -> usize {
         self.round.survivor_count as usize + 1
+    }
+
+    /// 이 설정의 정상 클라이언트가 초당 보내는 메시지 수: 틱마다 입력 하나(서버 틱 속도 보정으로 최대
+    /// `rate_max_deviation`만큼 더)와 지연 측정.
+    pub fn normal_messages_per_second(&self) -> f64 {
+        f64::from(self.sim.tick_rate) * (1.0 + self.client.rate_max_deviation)
+            + 1.0 / self.client.ping_interval
+    }
+
+    /// 연결의 메시지 수 한도 `limit`가 이 설정의 정상 송신량을 넉넉히 받는지. 모자라면 모든 연결이 곧바로 끊깁니다.
+    /// 서버는 한도를 시작할 때 한 번만 읽으므로, 실행 중 다시 읽은 설정은 시작 때의 한도로 이 검사를 해야 합니다.
+    pub fn check_message_limit(&self, limit: u32) -> Result<(), String> {
+        let normal = self.normal_messages_per_second();
+        let required = libm::ceil(normal * MESSAGE_RATE_MARGIN);
+        if f64::from(limit) < required {
+            Err(format!(
+                "메시지 수 한도 {limit}가 정상 클라이언트의 초당 메시지 수({normal:.1})에 여유를 둔 {required}보다 작습니다 (net.max_messages_per_second)"
+            ))
+        } else {
+            Ok(())
+        }
     }
 }
 

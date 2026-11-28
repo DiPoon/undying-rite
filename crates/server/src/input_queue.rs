@@ -82,6 +82,8 @@ pub struct InputQueue {
     substitutes: u32,
     extra: usize,
     grow_pending: bool,
+    /// 서버가 건너뛴 틱 수. 그동안 실제 시간은 흘렀고 입력도 도착했으므로, 이만큼은 여유분 없이 더 따라잡을 수 있습니다.
+    skipped_allowance: u64,
     ticks: u64,
     quiet_since: u64,
     pub stats: QueueStats,
@@ -104,6 +106,14 @@ impl InputQueue {
             self.stats.dropped += 1;
         }
         self.stats.max_len = self.stats.max_len.max(self.queue.len());
+    }
+
+    /// 서버 틱 루프가 밀려서 `n`틱을 건너뛰었을 때 부릅니다.
+    pub fn skip_ticks(&mut self, n: u64, p: &QueueParams) {
+        self.skipped_allowance = self
+            .skipped_allowance
+            .saturating_add(n)
+            .min(p.queue_max as u64);
     }
 
     /// 마지막으로 쓴 칸의 일련번호
@@ -158,15 +168,27 @@ impl InputQueue {
         }
 
         let target = p.buffer_target + self.extra;
+        if self.queue.len() <= target {
+            self.skipped_allowance = 0;
+        }
         let mut out = Vec::new();
-        while out.len() < p.max_per_tick && self.credit >= CREDIT_UNIT {
+        while out.len() < p.max_per_tick {
+            let has_credit = self.credit >= CREDIT_UNIT;
+            let use_allowance = !has_credit && !out.is_empty() && self.skipped_allowance > 0;
+            if !has_credit && !use_allowance {
+                break;
+            }
             if !out.is_empty() && self.queue.len() <= target {
                 break;
             }
             let Some((seq, input)) = self.queue.pop_front() else {
                 break;
             };
-            self.credit -= CREDIT_UNIT;
+            if has_credit {
+                self.credit -= CREDIT_UNIT;
+            } else {
+                self.skipped_allowance -= 1;
+            }
             self.ack = seq;
             self.last_input = input;
             self.substitutes = 0;
@@ -389,6 +411,33 @@ mod tests {
         assert_eq!(q.stats.shrinks, 1);
         assert_eq!(q.stats.grows, 1, "{:?}", q.stats);
         assert_eq!(q.stats.extra_buffer, 0);
+    }
+
+    #[test]
+    fn backlog_after_skipped_ticks_is_caught_up_quickly() {
+        let p = params();
+        let mut q = InputQueue::default();
+        let mut seq = 0;
+        let mut push = |q: &mut InputQueue, k: usize| {
+            for _ in 0..k {
+                seq += 1;
+                q.push(seq, input(1), &p);
+            }
+        };
+        push(&mut q, 2);
+        for _ in 0..50 {
+            take(&mut q, &p);
+            push(&mut q, 1);
+        }
+        // 서버가 10틱을 건너뛰는 동안 입력 10개가 도착
+        push(&mut q, 10);
+        q.skip_ticks(10, &p);
+        for _ in 0..12 {
+            take(&mut q, &p);
+            push(&mut q, 1);
+        }
+        assert!(q.len() <= p.buffer_target + 1, "대기열 {}", q.len());
+        assert_eq!(q.stats.starved_ticks, 0);
     }
 
     #[test]

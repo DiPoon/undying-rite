@@ -92,7 +92,7 @@ pub fn delay_line<T: Send + 'static>(
 mod tests {
     use super::*;
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn keeps_order_and_delays_within_bounds() {
         let lag = LagSpec::new(100, 60);
         let (tx, mut rx) = delay_line::<(u32, Instant)>(lag, 9, 64);
@@ -113,14 +113,14 @@ mod tests {
         assert_eq!(expect, 50);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn zero_lag_passes_through() {
         let (tx, mut rx) = delay_line::<u8>(LagSpec::default(), 1, 4);
         tx.send(7).await.unwrap();
         assert_eq!(rx.recv().await, Some(7));
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn stalled_receiver_eventually_fills_the_input() {
         // 받는 쪽이 읽지 않으면(소켓이 막힌 경우) 쌓이는 양에 상한이 있고, 보내는 쪽의 try_send가 실패합니다.
         for lag in [LagSpec::default(), LagSpec::new(20, 0)] {

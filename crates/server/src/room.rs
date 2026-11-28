@@ -106,7 +106,16 @@ struct Room {
 /// 방 채널의 크기. 연결 태스크가 넣는 쪽이고, 차면 그 연결이 기다립니다.
 const ROOM_CHANNEL: usize = 1024;
 
-pub fn spawn_room(code: String, id: u64, setup: Arc<Setup>, seed: u64, rooms: Rooms) -> RoomHandle {
+/// `idle_close`는 아무도 들어오지 않은 방을 닫기까지의 시간입니다. 연결의 입장 대기 시간과 맞추려고
+/// 방마다 다시 읽은 설정이 아니라 서버를 띄울 때의 값을 받습니다.
+pub fn spawn_room(
+    code: String,
+    id: u64,
+    setup: Arc<Setup>,
+    seed: u64,
+    rooms: Rooms,
+    idle_close: Duration,
+) -> RoomHandle {
     let (tx, rx) = mpsc::channel(ROOM_CHANNEL);
     let params = SimParams::from_config(&setup.cfg);
     let queue_params = QueueParams::from_config(&setup.cfg);
@@ -136,19 +145,18 @@ pub fn spawn_room(code: String, id: u64, setup: Arc<Setup>, seed: u64, rooms: Ro
         catchup_ticks: 0,
         skipped_ticks: 0,
     };
-    tokio::spawn(room.run(rx));
+    tokio::spawn(room.run(rx, idle_close));
     RoomHandle { id, tx }
 }
 
 impl Room {
-    async fn run(mut self, mut rx: mpsc::Receiver<RoomMsg>) {
+    async fn run(mut self, mut rx: mpsc::Receiver<RoomMsg>, idle_limit: Duration) {
         let tick_rate = f64::from(self.params.tick_rate);
         let net = self.setup.cfg.net.clone();
         let offset = |n: u64| Duration::from_secs_f64(n as f64 / tick_rate);
         let created = Instant::now();
         let mut base = created;
         let mut scheduled: u64 = 0;
-        let idle_limit = Duration::from_secs_f64(net.join_timeout * 2.0);
         crate::log!("[방 {}] 열림", self.code);
         loop {
             let due = base + offset(scheduled + 1);
@@ -162,7 +170,12 @@ impl Room {
                         }
                         if ran >= net.max_catchup_ticks {
                             let behind = ((now - base).as_secs_f64() * tick_rate) as u64;
-                            self.skipped_ticks += behind.saturating_sub(scheduled);
+                            let skipped = behind.saturating_sub(scheduled);
+                            self.skipped_ticks += skipped;
+                            let qp = self.queue_params;
+                            for p in self.players.values_mut() {
+                                p.queue.skip_ticks(skipped, &qp);
+                            }
                             base = now;
                             scheduled = 0;
                             break;
@@ -211,7 +224,7 @@ impl Room {
                     client_time,
                     server_tick: self.state.tick as f64 + since.min(1.0),
                 };
-                self.send_to(player, &msg);
+                self.send_or_drop(player, &msg);
             }
             RoomMsg::Leave { player } => self.leave(player, "연결 종료"),
             RoomMsg::Report { reply } => {
@@ -245,7 +258,7 @@ impl Room {
             },
         );
         self.had_players = true;
-        self.send_to(id, &welcome);
+        self.send_or_drop(id, &welcome);
         crate::log!(
             "[방 {}] {name}({}) 입장, {}명",
             self.code,
@@ -281,25 +294,39 @@ impl Room {
                 })
                 .collect(),
         };
-        let ids: Vec<PlayerId> = self.players.keys().copied().collect();
-        for id in ids {
-            self.send_to(id, &msg);
-        }
+        let failed: Vec<PlayerId> = self
+            .players
+            .keys()
+            .copied()
+            .filter(|&id| !self.try_send(id, &msg))
+            .collect();
+        // 보내기에 실패한 플레이어는 다 보낸 뒤에 내보냅니다. 루프 안에서 내보내면 그 퇴장이 보내는 새 명단 뒤에
+        // 이 루프의 옛 명단이 남은 플레이어에게 다시 가서 명단이 거꾸로 돌아갑니다.
+        self.drop_players(&failed);
     }
 
-    /// 보내지 못하면(연결이 닫혔거나 너무 밀림) 그 플레이어를 내보냅니다.
-    fn send_to(&mut self, id: PlayerId, msg: &ServerMsg) {
+    /// 보냈으면 참. 연결이 닫혔거나 송신 대기열이 가득 차면 거짓입니다. 플레이어가 없으면 참으로 봅니다.
+    fn try_send(&self, id: PlayerId, msg: &ServerMsg) -> bool {
         let Some(p) = self.players.get(&id) else {
-            return;
+            return true;
         };
-        let ok = match protocol::encode(msg) {
+        match protocol::encode(msg) {
             Ok(text) => p.out.try_send(text).is_ok(),
             Err(e) => {
                 crate::log!("[방 {}] 메시지 인코딩 실패: {e}", self.code);
                 true
             }
-        };
-        if !ok {
+        }
+    }
+
+    fn send_or_drop(&mut self, id: PlayerId, msg: &ServerMsg) {
+        if !self.try_send(id, msg) {
+            self.drop_players(&[id]);
+        }
+    }
+
+    fn drop_players(&mut self, ids: &[PlayerId]) {
+        for &id in ids {
             self.leave(id, "보내기 실패 (연결 닫힘 또는 송신 대기열 가득 참)");
         }
     }
@@ -336,18 +363,20 @@ impl Room {
             .collect();
         let _events = step(&mut self.state, &world, &self.params, &frame);
 
-        let ids: Vec<PlayerId> = self.players.keys().copied().collect();
-        for id in ids {
+        let mut failed = Vec::new();
+        for (&id, p) in &self.players {
             let view = view_for(&self.state, id);
-            let ack = self.players.get(&id).map_or(0, |p| p.queue.ack());
             let msg = ServerMsg::State {
                 tick: view.tick,
-                ack,
+                ack: p.queue.ack(),
                 me: view.me,
                 others: view.others,
             };
-            self.send_to(id, &msg);
+            if !self.try_send(id, &msg) {
+                failed.push(id);
+            }
         }
+        self.drop_players(&failed);
         self.durations.push(start.elapsed().as_micros() as u64);
     }
 

@@ -101,7 +101,7 @@ export class Renderer {
       g.position.set(c.x, c.y);
       g.rotation = c.facing;
       g.scale.set(c.radius);
-      // 자기 캐릭터를 맨 위에 그립니다.
+      // 다른 캐릭터와 겹쳐도 자기 위치를 놓치지 않게 자기 캐릭터가 위에 오도록 합니다.
       g.zIndex = c.is_self ? 1 : 0;
 
       let label = this.labels.get(c.id);

@@ -584,7 +584,6 @@ dependencies = [
  "axum",
  "futures-util",
  "serde",
- "serde_json",
  "shared",
  "tokio",
  "tower-http",

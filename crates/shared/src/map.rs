@@ -177,7 +177,6 @@ impl Map {
             }
         };
 
-        // 가장자리
         for y in 0..h {
             for x in 0..w {
                 let edge = x == 0 || y == 0 || x == w - 1 || y == h - 1;

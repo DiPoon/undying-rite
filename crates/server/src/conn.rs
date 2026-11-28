@@ -21,7 +21,6 @@ pub async fn handle(socket: WebSocket, app: AppState, lag: LagSpec, conn_id: u64
     let net = app.net().clone();
     let max_bytes = net.max_message_bytes as usize;
 
-    // 1. 입장 메시지
     let join_wait = Duration::from_secs_f64(net.join_timeout);
     let first = match timeout(join_wait, next_text(&mut stream)).await {
         Ok(Some(t)) => t,
@@ -59,7 +58,6 @@ pub async fn handle(socket: WebSocket, app: AppState, lag: LagSpec, conn_id: u64
         }
     };
 
-    // 2. 나가는 길: 방 → 지연선(유계) → 소켓
     // 소켓이 막히면 지연선이 차고, 방의 try_send가 실패해서 방이 이 플레이어를 내보냅니다.
     let queue_max = net.send_queue_max as usize;
     let (out_tx, mut out_rx) = delay_line::<String>(lag, conn_id ^ 0x5eed_0001, queue_max);
@@ -75,7 +73,6 @@ pub async fn handle(socket: WebSocket, app: AppState, lag: LagSpec, conn_id: u64
         let _ = timeout(write_timeout, sink.close()).await;
     });
 
-    // 3. 방 찾기 또는 만들기
     let (room, player) = match join_room(&app, &room_code, &name, out_tx.clone(), conn_id).await {
         Ok(v) => v,
         Err(reason) => {
@@ -95,7 +92,6 @@ pub async fn handle(socket: WebSocket, app: AppState, lag: LagSpec, conn_id: u64
         lag.jitter_ms
     );
 
-    // 4. 들어오는 길: 소켓 → 검증 → 지연선 → 방
     let (delay_in_in, mut delay_in_rx) =
         delay_line::<RoomMsg>(lag, conn_id ^ 0x5eed_0002, queue_max);
     let room_tx = room.tx.clone();
@@ -192,7 +188,9 @@ async fn join_room(
                     Some(h) => h.clone(),
                     None => {
                         let id = app.next_id();
-                        let h = spawn_room(code.to_string(), id, setup, id, app.rooms());
+                        let idle_close = Duration::from_secs_f64(app.net().join_timeout * 2.0);
+                        let h =
+                            spawn_room(code.to_string(), id, setup, id, app.rooms(), idle_close);
                         rooms.insert(code.to_string(), h.clone());
                         h
                     }

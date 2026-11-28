@@ -71,7 +71,16 @@ async function play(room: string, name: string): Promise<void> {
   el('game').hidden = false;
   showBanner(S.connecting);
 
-  const renderer = await Renderer.create(el('stage'), el('labels'));
+  let renderer: Renderer;
+  try {
+    renderer = await Renderer.create(el('stage'), el('labels'));
+  } catch (e) {
+    // WebGL을 쓸 수 없는 경우 등. 입장 화면으로 돌아가 이유를 보여 줍니다.
+    el('game').hidden = true;
+    el('join').hidden = false;
+    el('join-error').textContent = `${S.rendererFailed} ${String(e)}`;
+    return;
+  }
   const input = new Input(renderer.canvas);
   // 주소에 lag/jitter가 있을 때만 넘깁니다. 없으면 서버의 --lag-ms, --jitter-ms 기본값이 적용됩니다.
   const lag = params.get('lag');
