@@ -64,25 +64,39 @@ impl ServerClock {
 
 /// 다른 캐릭터를 그릴 시각. 상태 메시지가 도착한 시각을 기준으로, 가장 빨리 도착한 쪽에 맞춘 시간축에서
 /// 보간 지연만큼 뒤를 재생합니다. 목표에서 벗어나면 재생 속도를 조금만 바꿔 천천히 따라가서 화면이 튀지 않게 합니다.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Playback {
+    params: PlaybackParams,
     arrivals: VecDeque<(f64, f64)>,
     tick: Option<f64>,
 }
 
-const ARRIVAL_WINDOW_MS: f64 = 2000.0;
-/// 재생 속도를 바꿀 수 있는 폭 (±10%)
-const MAX_RATE_ADJUST: f64 = 0.1;
-/// 이미 가장 새 상태를 지나쳐 멈춰 있을 때는 이만큼까지 늦춰서 빨리 빠져나옵니다 (−50%)
-const MAX_SLOWDOWN_WHEN_STARVED: f64 = 0.5;
-/// 목표와 이만큼 넘게 벌어지면 따라가지 않고 바로 맞춥니다 (틱)
-const SNAP_TICKS: f64 = 10.0;
+/// `config/balance.toml`의 `[client]` 값을 ms와 틱으로 한 번 환산해 둔 것
+#[derive(Debug, Clone, Copy)]
+pub struct PlaybackParams {
+    /// 재생 시각을 정할 때 보는 최근 도착 기록의 길이
+    pub arrival_window_ms: f64,
+    /// 재생 속도를 바꿀 수 있는 폭 (±비율)
+    pub rate_adjust: f64,
+    /// 이미 가장 새 상태를 지나쳐 멈춰 있을 때 늦출 수 있는 폭 (비율)
+    pub starved_slowdown: f64,
+    /// 목표와 이만큼 넘게 벌어지면 따라가지 않고 바로 맞춤 (틱)
+    pub snap_ticks: f64,
+}
 
 impl Playback {
+    pub fn new(params: PlaybackParams) -> Self {
+        Playback {
+            params,
+            arrivals: VecDeque::new(),
+            tick: None,
+        }
+    }
+
     pub fn on_state(&mut self, tick: u64, now_ms: f64) {
         self.arrivals.push_back((now_ms, tick as f64));
         while let Some(&(t, _)) = self.arrivals.front() {
-            if now_ms - t > ARRIVAL_WINDOW_MS && self.arrivals.len() > 1 {
+            if now_ms - t > self.params.arrival_window_ms && self.arrivals.len() > 1 {
                 self.arrivals.pop_front();
             } else {
                 break;
@@ -119,16 +133,16 @@ impl Playback {
                 let dt_ticks = dt_ms * rate;
                 let t = t + dt_ticks;
                 let err = target - t;
-                if err.abs() > SNAP_TICKS {
+                if err.abs() > self.params.snap_ticks {
                     target
                 } else {
                     let starved = newest_tick.is_some_and(|n| t > n as f64);
                     let down = if starved {
-                        MAX_SLOWDOWN_WHEN_STARVED
+                        self.params.starved_slowdown
                     } else {
-                        MAX_RATE_ADJUST
+                        self.params.rate_adjust
                     };
-                    t + err.clamp(-dt_ticks * down, dt_ticks * MAX_RATE_ADJUST)
+                    t + err.clamp(-dt_ticks * down, dt_ticks * self.params.rate_adjust)
                 }
             }
         };
@@ -156,24 +170,37 @@ impl Playback {
 /// 이 개발 환경에서는 WSL 시계가 Windows 시계보다 약 2.5% 느렸습니다. 로컬 예측 틱과 보간 재생을 명목 틱레이트가 아니라
 /// 이 값으로 진행해야 서버가 입력을 쓰는 속도와 클라이언트가 입력을 만드는 속도가 같아집니다.
 /// 최근 상태들의 (도착 시각, 틱)에 직선을 맞춘 기울기이고, 표본이 모자라면 명목값을 씁니다.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct RateEstimator {
+    params: RateParams,
     samples: VecDeque<(f64, f64)>,
 }
 
-const RATE_WINDOW_MS: f64 = 10_000.0;
-const RATE_MIN_SPAN_MS: f64 = 2_000.0;
-/// 명목값에서 이보다 많이 벗어난 추정은 측정 오류로 보고 잘라 냅니다.
-const RATE_MAX_DEVIATION: f64 = 0.05;
+/// `config/balance.toml`의 `[client]` 값을 ms로 한 번 환산해 둔 것
+#[derive(Debug, Clone, Copy)]
+pub struct RateParams {
+    pub window_ms: f64,
+    /// 기록이 이보다 짧으면 명목값을 씀
+    pub min_span_ms: f64,
+    /// 명목값에서 이보다 많이 벗어난 추정은 측정 오류로 보고 잘라 냄 (비율)
+    pub max_deviation: f64,
+}
 
 impl RateEstimator {
+    pub fn new(params: RateParams) -> Self {
+        RateEstimator {
+            params,
+            samples: VecDeque::new(),
+        }
+    }
+
     pub fn push(&mut self, now_ms: f64, tick: u64) {
         self.samples.push_back((now_ms, tick as f64));
         while self.samples.len() > 2
             && self
                 .samples
                 .front()
-                .is_some_and(|&(t, _)| now_ms - t > RATE_WINDOW_MS)
+                .is_some_and(|&(t, _)| now_ms - t > self.params.window_ms)
         {
             self.samples.pop_front();
         }
@@ -184,7 +211,7 @@ impl RateEstimator {
         else {
             return nominal;
         };
-        if last - first < RATE_MIN_SPAN_MS {
+        if last - first < self.params.min_span_ms {
             return nominal;
         }
         let n = self.samples.len() as f64;
@@ -200,8 +227,8 @@ impl RateEstimator {
             return nominal;
         }
         slope.clamp(
-            nominal * (1.0 - RATE_MAX_DEVIATION),
-            nominal * (1.0 + RATE_MAX_DEVIATION),
+            nominal * (1.0 - self.params.max_deviation),
+            nominal * (1.0 + self.params.max_deviation),
         )
     }
 }
@@ -209,6 +236,23 @@ impl RateEstimator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn playback() -> Playback {
+        Playback::new(PlaybackParams {
+            arrival_window_ms: 2000.0,
+            rate_adjust: 0.1,
+            starved_slowdown: 0.5,
+            snap_ticks: 10.0,
+        })
+    }
+
+    fn rate() -> RateEstimator {
+        RateEstimator::new(RateParams {
+            window_ms: 10_000.0,
+            min_span_ms: 2_000.0,
+            max_deviation: 0.05,
+        })
+    }
 
     #[test]
     fn clock_prefers_lowest_rtt_sample() {
@@ -225,7 +269,7 @@ mod tests {
 
     #[test]
     fn rate_follows_a_server_clock_that_runs_slow() {
-        let mut r = RateEstimator::default();
+        let mut r = rate();
         let nominal = 30.0 / 1000.0;
         assert_eq!(r.ticks_per_ms(nominal), nominal, "표본이 없으면 명목값");
         // 서버가 클라이언트 시계로 초당 29.25틱을 돌고, 도착 시각이 ±15ms 흔들림
@@ -240,7 +284,7 @@ mod tests {
 
     #[test]
     fn playback_runs_behind_newest_and_glides() {
-        let mut p = Playback::default();
+        let mut p = playback();
         let tick_ms = 1000.0 / 30.0;
         let delay = 3.0;
         let mut now = 0.0;

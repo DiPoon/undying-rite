@@ -12,7 +12,7 @@ pub struct BalanceConfig {
     pub common: CommonSection,
     pub objective: PointCountSection,
     pub restraint: PointCountSection,
-    pub respawn: PointCountSection,
+    pub respawn: RespawnSection,
     pub camera: CameraSection,
     pub net: NetSection,
     pub client: ClientSection,
@@ -51,6 +51,14 @@ pub struct PointCountSection {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct RespawnSection {
+    pub point_count: u32,
+    /// 시작·리스폰 지점이 비어 있다고 보려면 다른 캐릭터가 이 거리 밖에 있어야 합니다.
+    pub occupied_distance: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CameraSection {
     pub view_height: f64,
     pub max_aspect_w: f64,
@@ -71,6 +79,9 @@ pub struct NetSection {
     pub max_catchup_ticks: u32,
     pub max_message_bytes: u32,
     pub max_messages_per_second: u32,
+    pub message_burst: u32,
+    pub send_queue_max: u32,
+    pub write_timeout: f64,
     pub join_timeout: f64,
 }
 
@@ -83,6 +94,14 @@ pub struct ClientSection {
     pub max_catchup_ticks: u32,
     pub max_pending_inputs: u32,
     pub ping_interval: f64,
+    pub max_frame_gap: f64,
+    pub interp_arrival_window: f64,
+    pub interp_rate_adjust: f64,
+    pub interp_starved_slowdown: f64,
+    pub interp_snap: f64,
+    pub rate_window: f64,
+    pub rate_min_span: f64,
+    pub rate_max_deviation: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -109,6 +128,9 @@ impl fmt::Display for ConfigError {
 }
 
 impl std::error::Error for ConfigError {}
+
+/// 메시지 수 제한이 정상 송신량보다 이만큼은 커야 합니다 (흔들림으로 한 초에 몰리는 것을 받아 줄 여유).
+const MESSAGE_RATE_MARGIN: f64 = 1.5;
 
 struct RangeCheck(Vec<String>);
 
@@ -144,6 +166,12 @@ impl BalanceConfig {
         c.u("objective.point_count", self.objective.point_count, 0, 64);
         c.u("restraint.point_count", self.restraint.point_count, 0, 64);
         c.u("respawn.point_count", self.respawn.point_count, 1, 64);
+        c.f(
+            "respawn.occupied_distance",
+            self.respawn.occupied_distance,
+            0.0,
+            10.0,
+        );
         c.f("camera.view_height", self.camera.view_height, 4.0, 200.0);
         c.f("camera.max_aspect_w", self.camera.max_aspect_w, 1.0, 100.0);
         c.f("camera.max_aspect_h", self.camera.max_aspect_h, 1.0, 100.0);
@@ -180,6 +208,15 @@ impl BalanceConfig {
             10,
             10_000,
         );
+        c.u("net.message_burst", n.message_burst, 1, 1_000_000);
+        if n.message_burst < n.max_messages_per_second {
+            c.0.push(format!(
+                "net.message_burst = {}는 net.max_messages_per_second = {} 이상이어야 합니다",
+                n.message_burst, n.max_messages_per_second
+            ));
+        }
+        c.u("net.send_queue_max", n.send_queue_max, 8, 100_000);
+        c.f("net.write_timeout", n.write_timeout, 0.1, 60.0);
         c.f("net.join_timeout", n.join_timeout, 0.5, 120.0);
         let cl = &self.client;
         c.f("client.interp_delay", cl.interp_delay, 0.0, 2.0);
@@ -198,6 +235,41 @@ impl BalanceConfig {
             10_000,
         );
         c.f("client.ping_interval", cl.ping_interval, 0.05, 60.0);
+        c.f("client.max_frame_gap", cl.max_frame_gap, 0.1, 10.0);
+        c.f(
+            "client.interp_arrival_window",
+            cl.interp_arrival_window,
+            0.2,
+            30.0,
+        );
+        c.f("client.interp_rate_adjust", cl.interp_rate_adjust, 0.0, 0.5);
+        c.f(
+            "client.interp_starved_slowdown",
+            cl.interp_starved_slowdown,
+            0.0,
+            0.9,
+        );
+        c.f("client.interp_snap", cl.interp_snap, 0.05, 10.0);
+        c.f("client.rate_window", cl.rate_window, 1.0, 120.0);
+        c.f("client.rate_min_span", cl.rate_min_span, 0.1, 120.0);
+        if cl.rate_min_span > cl.rate_window {
+            c.0.push(format!(
+                "client.rate_min_span = {}는 client.rate_window = {} 이하여야 합니다",
+                cl.rate_min_span, cl.rate_window
+            ));
+        }
+        c.f("client.rate_max_deviation", cl.rate_max_deviation, 0.0, 0.2);
+        // 정상 클라이언트가 보내는 양(틱마다 입력 하나, 서버 틱 속도 보정으로 최대 rate_max_deviation만큼 더,
+        // 거기에 지연 측정)보다 메시지 수 제한이 넉넉해야 합니다. 그렇지 않으면 모든 연결이 곧바로 끊깁니다.
+        let normal =
+            f64::from(self.sim.tick_rate) * (1.0 + cl.rate_max_deviation) + 1.0 / cl.ping_interval;
+        let required = libm::ceil(normal * MESSAGE_RATE_MARGIN);
+        if f64::from(n.max_messages_per_second) < required {
+            c.0.push(format!(
+                "net.max_messages_per_second = {}가 정상 클라이언트의 초당 메시지 수({:.1})에 여유를 둔 {}보다 작습니다",
+                n.max_messages_per_second, normal, required
+            ));
+        }
         if c.0.is_empty() {
             Ok(())
         } else {
@@ -282,6 +354,23 @@ mod tests {
             BalanceConfig::from_toml_str(&missing),
             Err(ConfigError::Parse(_))
         ));
+    }
+
+    #[test]
+    fn message_limit_must_cover_a_normal_client() {
+        // 허용 범위 안의 값끼리라도, 틱레이트 120에서 기본 메시지 제한 120이면 정상 클라이언트가 끊깁니다.
+        let text = REAL.replace("tick_rate = 30", "tick_rate = 120");
+        match BalanceConfig::from_toml_str(&text) {
+            Err(ConfigError::OutOfRange(items)) => {
+                assert!(
+                    items
+                        .iter()
+                        .any(|m| m.contains("net.max_messages_per_second")),
+                    "{items:?}"
+                );
+            }
+            other => panic!("교차 검사 오류가 나야 합니다: {other:?}"),
+        }
     }
 
     #[test]

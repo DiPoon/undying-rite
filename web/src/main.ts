@@ -73,12 +73,19 @@ async function play(room: string, name: string): Promise<void> {
 
   const renderer = await Renderer.create(el('stage'), el('labels'));
   const input = new Input(renderer.canvas);
-  const lag = params.get('lag') ?? '0';
-  const jitter = params.get('jitter') ?? '0';
-  const lagNote = lag !== '0' || jitter !== '0' ? S.lagNotice(lag, jitter) : null;
+  // 주소에 lag/jitter가 있을 때만 넘깁니다. 없으면 서버의 --lag-ms, --jitter-ms 기본값이 적용됩니다.
+  const lag = params.get('lag');
+  const jitter = params.get('jitter');
+  const lagNote =
+    lag !== null || jitter !== null
+      ? S.lagNotice(lag ?? S.serverDefault, jitter ?? S.serverDefault)
+      : null;
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-  const query = new URLSearchParams({ lag_ms: lag, jitter_ms: jitter });
-  const ws = new WebSocket(`${scheme}://${location.host}/ws?${query}`);
+  const query = new URLSearchParams();
+  if (lag !== null) query.set('lag_ms', lag);
+  if (jitter !== null) query.set('jitter_ms', jitter);
+  const qs = query.toString();
+  const ws = new WebSocket(`${scheme}://${location.host}/ws${qs === '' ? '' : `?${qs}`}`);
   let closed = false;
   ws.onopen = () => ws.send(joinMsg);
   ws.onmessage = (e) => {

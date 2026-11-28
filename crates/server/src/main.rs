@@ -11,7 +11,9 @@ const USAGE: &str = "\
   --map 파일             기본 maps/test.txt
   --lag-ms 밀리초        주소에 지정하지 않은 연결에 넣을 왕복 지연. 기본 0
   --jitter-ms 밀리초     왕복 지연의 흔들림 폭(±). 기본 0
-연결마다 지연을 바꾸려면 브라우저 주소에 ?lag=150&jitter=30 을 붙입니다.";
+연결마다 지연을 바꾸려면 브라우저 주소에 ?lag=150&jitter=30 을 붙입니다. 붙이지 않은 연결에는 --lag-ms, --jitter-ms가 적용됩니다.
+설정 파일은 방을 새로 만들 때마다 다시 읽습니다. 단, [net]의 연결 제한값(max_message_bytes, max_messages_per_second,
+message_burst, send_queue_max, write_timeout, join_timeout)은 서버를 띄울 때만 읽으므로 바꾸려면 다시 띄워야 합니다.";
 
 fn parse_args() -> Result<ServerOptions, String> {
     let mut opts = ServerOptions {

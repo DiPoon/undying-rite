@@ -132,6 +132,8 @@ impl InputQueue {
             self.extra -= 1;
             self.quiet_since = self.ticks;
             self.stats.shrinks += 1;
+            // 줄이는 것은 조용했다는 뜻이므로, 예전 대신 쓰기로 남은 늘릴 준비는 버립니다.
+            self.grow_pending = false;
         }
         self.stats.extra_buffer = self.extra;
 
@@ -180,7 +182,8 @@ impl InputQueue {
                 self.substitutes += 1;
                 self.ack = self.ack.wrapping_add(1);
                 self.credit -= CREDIT_UNIT;
-                self.grow_pending = true;
+                // 이미 상한까지 늘렸으면 더 늘릴 수 없으므로 표시하지 않습니다.
+                self.grow_pending = self.extra < p.buffer_grow_max;
                 self.quiet_since = self.ticks;
                 out.push(self.last_input);
             } else {
@@ -352,6 +355,40 @@ mod tests {
             "늘렸던 칸이 따라잡기로 줄어듦: {}",
             q.len()
         );
+    }
+
+    #[test]
+    fn substitution_at_the_cap_does_not_regrow_after_shrinking() {
+        let mut p = params();
+        p.buffer_grow_max = 1;
+        let mut q = InputQueue::default();
+        let mut seq = 0;
+        let mut push = |q: &mut InputQueue, k: usize| {
+            for _ in 0..k {
+                seq += 1;
+                q.push(seq, input(0), &p);
+            }
+        };
+        push(&mut q, 2);
+        take(&mut q, &p);
+        take(&mut q, &p);
+        take(&mut q, &p); // 대신 쓰기
+        push(&mut q, 2);
+        q.take_for_tick(&p, |_| true); // 한 칸 늘림 → 상한
+        assert_eq!(q.stats.extra_buffer, 1);
+        // 상한에서 또 대신 쓰기
+        while !q.is_empty() {
+            take(&mut q, &p);
+        }
+        take(&mut q, &p);
+        // 조용히 기다려 한 칸 줄어든 뒤, 멈춰 서 있어도 다시 늘지 않아야 함
+        for _ in 0..(p.shrink_after_ticks + 50) {
+            push(&mut q, 1);
+            q.take_for_tick(&p, |_| true);
+        }
+        assert_eq!(q.stats.shrinks, 1);
+        assert_eq!(q.stats.grows, 1, "{:?}", q.stats);
+        assert_eq!(q.stats.extra_buffer, 0);
     }
 
     #[test]

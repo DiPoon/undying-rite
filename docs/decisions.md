@@ -102,3 +102,23 @@
 - WebAssembly는 wasm-pack 대신 `wasm-bindgen-cli`를 직접 씀(둘 다 `wasm-bindgen` 조직이 2026-10-30에 릴리스, wasm-pack도 안에서 이것을 받아 씀). 버전은 `Cargo.lock`의 `wasm-bindgen`과 같아야 하므로 `scripts/setup.sh`가 맞춰 설치함.
 - TypeScript는 설치 시점 최신판 7.0.2(Go로 다시 쓴 컴파일러)를 씀. 타입 검사와 빌드에 문제가 없었음.
 - tools의 `tokio-tungstenite`는 axum 0.8.9가 쓰는 0.29에 맞춤(최신 0.30을 쓰면 같은 라이브러리가 두 벌 컴파일됨).
+
+## 2026-11-28 (M0, PR #1 리뷰 반영)
+
+**설정 파일에 두는 수치와 코드 상수의 경계**
+- 빈 곳: CLAUDE.md "수치를 코드에 직접 쓰지 않습니다"가 어디까지인지.
+- 정함: 게임 규칙의 수치, 그리고 네트워크·예측·보간의 동작을 바꾸는 조정값은 `config/balance.toml`에 둠. 이번에 옮긴 것: 시작 지점 점유 거리(`respawn.occupied_distance`), 보간 재생(`client.interp_arrival_window`, `interp_rate_adjust`, `interp_starved_slowdown`, `interp_snap`), 서버 틱 속도 추정(`client.rate_window`, `rate_min_span`, `rate_max_deviation`), 버리는 프레임 간격(`client.max_frame_gap`), 연결 제한(`net.message_burst`, `send_queue_max`, `write_timeout`).
+- 코드 상수로 남기는 것: 디버그 표시용 창 길이(최근 5초 최대 오차 등), 메모리 상한(보관할 스냅숏 수 등), 수치 계산의 허용 오차와 반복 횟수(`PENETRATION_EPSILON`, `RESOLVE_ITERATIONS`, `MAX_SUBSTEPS`), 단위(`CREDIT_UNIT`), 안전 상한(`MAX_LAG_MS`), 설정 검증의 여유 비율(`MESSAGE_RATE_MARGIN`). 플레이테스트에서 바꿀 일이 없거나 바꾸면 계산이 깨지는 값들임.
+
+**메시지 수 제한은 토큰 버킷**
+- 정함: 1초 고정 창 대신, 초당 `net.max_messages_per_second`씩 차고 `net.message_burst`(600)까지 모이는 토큰 버킷. 망이나 서버가 몇 초 멈췄다 풀리면 쌓인 정상 메시지가 한꺼번에 읽히는데, 멈춘 시간만큼 토큰도 차 있어서 끊기지 않음.
+- 교차 검사: `max_messages_per_second`는 정상 클라이언트의 송신량(틱레이트 × (1 + `rate_max_deviation`) + 1/`ping_interval`)의 1.5배 이상이어야 함. 그렇지 않으면 설정을 읽을 때 오류.
+
+**보내는 길의 상한**
+- 정함: 방 → 지연선 → 소켓의 모든 단계가 유계(`net.send_queue_max`)이고, 소켓 쓰기 하나에 `net.write_timeout`(5초) 제한을 둠. 상대가 읽지 않으면 지연선이 차서 방의 `try_send`가 실패하고 그 플레이어를 내보냄. 쓰기가 끝나면 그 연결의 읽기도 끝냄.
+
+**연결 제한값의 적용 시점**
+- 정함: `[net]`의 연결 제한값은 방에 들어가기 전(입장 메시지 크기, 입장 대기 시간)부터 쓰이므로 서버를 띄울 때 한 번만 읽음. 바꾸려면 재시작. CLAUDE.md, 서버 사용법, `balance.toml` 주석에 적음.
+
+**지연 주입 기본값**
+- 정함: 브라우저와 `tools bots`는 주소나 옵션에 `lag`/`jitter`가 있을 때만 서버에 넘김. 없으면 서버의 `--lag-ms`, `--jitter-ms`가 적용됨. 전에는 항상 0을 넘겨서 서버 기본값이 브라우저에 적용되지 않았음.

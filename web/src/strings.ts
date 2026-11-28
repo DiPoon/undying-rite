@@ -27,6 +27,7 @@ export const S = {
   rejectUnknown: '입장이 거절되었습니다.',
 
   lagNotice: (lag: string, jitter: string) => `지연 주입: 왕복 ${lag}ms ± ${jitter}ms`,
+  serverDefault: '(서버 기본값)',
 
   debug: {
     room: '방',

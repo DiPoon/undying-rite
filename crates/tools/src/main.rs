@@ -85,12 +85,20 @@ fn run() -> Result<bool, String> {
             let room = args.0.get("room").cloned().ok_or("--room이 필요합니다")?;
             let clients: usize = args.num("clients", 2)?;
             let secs: f64 = args.num("secs", 600.0)?;
-            let lag = LagSpec::new(args.num("lag-ms", 0)?, args.num("jitter-ms", 0)?);
-            let sep = if url.contains('?') { '&' } else { '?' };
-            let url = format!(
-                "{url}{sep}lag_ms={}&jitter_ms={}",
-                lag.rtt_ms, lag.jitter_ms
-            );
+            // 옵션을 준 것만 붙입니다. 붙이지 않으면 서버의 --lag-ms, --jitter-ms 기본값이 적용됩니다.
+            let mut query = Vec::new();
+            if args.0.contains_key("lag-ms") {
+                query.push(format!("lag_ms={}", args.num::<u32>("lag-ms", 0)?));
+            }
+            if args.0.contains_key("jitter-ms") {
+                query.push(format!("jitter_ms={}", args.num::<u32>("jitter-ms", 0)?));
+            }
+            let url = if query.is_empty() {
+                url
+            } else {
+                let sep = if url.contains('?') { '&' } else { '?' };
+                format!("{url}{sep}{}", query.join("&"))
+            };
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
@@ -111,13 +119,19 @@ fn run() -> Result<bool, String> {
                     })
                     .collect();
                 let mut out = Vec::new();
+                let mut panics = Vec::new();
                 for t in tasks {
-                    if let Ok(o) = t.await {
-                        out.push(o);
+                    match t.await {
+                        Ok(o) => out.push(o),
+                        Err(e) => panics.push(e.to_string()),
                     }
                 }
-                out
+                (out, panics)
             });
+            let (outcomes, panics) = outcomes;
+            for p in &panics {
+                println!("봇 태스크 실패: {p}");
+            }
             for o in &outcomes {
                 let p = &o.report.prediction;
                 println!(
@@ -129,7 +143,9 @@ fn run() -> Result<bool, String> {
                     o.disconnected.as_deref().unwrap_or("없음")
                 );
             }
-            Ok(outcomes.iter().all(|o| o.disconnected.is_none()))
+            Ok(panics.is_empty()
+                && outcomes.len() == clients
+                && outcomes.iter().all(|o| o.disconnected.is_none()))
         }
         "--help" | "-h" | "help" => Err(String::new()),
         other => Err(format!("모르는 명령 {other}")),

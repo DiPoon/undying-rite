@@ -225,7 +225,7 @@ impl Room {
             return JoinReply::Full;
         }
         let id = PlayerId(self.next_player);
-        if add_character(&mut self.state, &self.setup.map, id).is_err() {
+        if add_character(&mut self.state, &self.setup.cfg, &self.setup.map, id).is_err() {
             return JoinReply::Full;
         }
         self.next_player += 1;

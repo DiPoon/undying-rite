@@ -13,10 +13,7 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, timeout};
 
-/// 방이 이 연결로 보내는 메시지를 쌓아 둘 수 있는 개수. 차면 방이 이 플레이어를 내보냅니다.
-const OUT_CHANNEL: usize = 256;
-/// 지연선을 지나 소켓에 쓰기를 기다리는 메시지가 이만큼 쌓이면 소켓이 못 따라오는 것으로 보고 끊습니다.
-const MAX_WRITE_BACKLOG: usize = 1024;
+/// 방이 닫히는 중이라 새 방을 만들어 다시 들어가는 시도의 횟수
 const JOIN_ATTEMPTS: usize = 3;
 
 pub async fn handle(socket: WebSocket, app: AppState, lag: LagSpec, conn_id: u64) {
@@ -62,26 +59,20 @@ pub async fn handle(socket: WebSocket, app: AppState, lag: LagSpec, conn_id: u64
         }
     };
 
-    // 2. 나가는 길: 방 → out_tx → 지연선 → 소켓
-    let (out_tx, mut out_rx) = mpsc::channel::<String>(OUT_CHANNEL);
-    let (delay_out_in, mut delay_out_rx) = delay_line::<String>(lag, conn_id ^ 0x5eed_0001);
-    tokio::spawn(async move {
+    // 2. 나가는 길: 방 → 지연선(유계) → 소켓
+    // 소켓이 막히면 지연선이 차고, 방의 try_send가 실패해서 방이 이 플레이어를 내보냅니다.
+    let queue_max = net.send_queue_max as usize;
+    let (out_tx, mut out_rx) = delay_line::<String>(lag, conn_id ^ 0x5eed_0001, queue_max);
+    let write_timeout = Duration::from_secs_f64(net.write_timeout);
+    let mut writer = tokio::spawn(async move {
         while let Some(m) = out_rx.recv().await {
-            if delay_out_in.send(m).is_err() {
-                return;
+            // 상대가 읽지 않아 송신 버퍼가 차면 send가 돌아오지 않으므로 시간 제한을 둡니다.
+            match timeout(write_timeout, sink.send(Message::Text(m.into()))).await {
+                Ok(Ok(())) => {}
+                Ok(Err(_)) | Err(_) => break,
             }
         }
-    });
-    let writer = tokio::spawn(async move {
-        while let Some(m) = delay_out_rx.recv().await {
-            if delay_out_rx.len() > MAX_WRITE_BACKLOG {
-                break;
-            }
-            if sink.send(Message::Text(m.into())).await.is_err() {
-                break;
-            }
-        }
-        let _ = sink.close().await;
+        let _ = timeout(write_timeout, sink.close()).await;
     });
 
     // 3. 방 찾기 또는 만들기
@@ -105,7 +96,8 @@ pub async fn handle(socket: WebSocket, app: AppState, lag: LagSpec, conn_id: u64
     );
 
     // 4. 들어오는 길: 소켓 → 검증 → 지연선 → 방
-    let (delay_in_in, mut delay_in_rx) = delay_line::<RoomMsg>(lag, conn_id ^ 0x5eed_0002);
+    let (delay_in_in, mut delay_in_rx) =
+        delay_line::<RoomMsg>(lag, conn_id ^ 0x5eed_0002, queue_max);
     let room_tx = room.tx.clone();
     let forward = tokio::spawn(async move {
         while let Some(m) = delay_in_rx.recv().await {
@@ -114,20 +106,31 @@ pub async fn handle(socket: WebSocket, app: AppState, lag: LagSpec, conn_id: u64
             }
         }
     });
-    let mut window_start = Instant::now();
-    let mut window_count: u32 = 0;
+    // 메시지 수 제한은 토큰 버킷입니다. 망이나 서버가 몇 초 멈췄다 풀리면 쌓여 있던 정상 메시지가 한꺼번에
+    // 읽히는데, 멈춘 시간만큼 토큰도 다시 차 있으므로 끊기지 않습니다. 오래 보내는 양은 초당 한도를 넘지 못합니다.
+    let refill_per_sec = f64::from(net.max_messages_per_second);
+    let burst = f64::from(net.message_burst);
+    let mut tokens = burst;
+    let mut last_refill = Instant::now();
+    let mut writer_done = false;
     let reason = loop {
-        let Some(text) = next_text(&mut stream).await else {
+        let text = tokio::select! {
+            t = next_text(&mut stream) => t,
+            _ = &mut writer, if !writer_done => {
+                writer_done = true;
+                break "보내기 실패 또는 쓰기 시간 초과";
+            }
+        };
+        let Some(text) = text else {
             break "연결 끊김";
         };
-        if window_start.elapsed() >= Duration::from_secs(1) {
-            window_start = Instant::now();
-            window_count = 0;
-        }
-        window_count += 1;
-        if window_count > net.max_messages_per_second {
+        let now = Instant::now();
+        tokens = (tokens + (now - last_refill).as_secs_f64() * refill_per_sec).min(burst);
+        last_refill = now;
+        if tokens < 1.0 {
             break "초당 메시지 수 초과";
         }
+        tokens -= 1.0;
         let msg = match protocol::decode_client(&text, max_bytes) {
             Ok(m) => m,
             Err(_) => break "잘못된 메시지",
@@ -140,7 +143,7 @@ pub async fn handle(socket: WebSocket, app: AppState, lag: LagSpec, conn_id: u64
             },
             ClientMsg::Join { .. } => continue,
         };
-        if delay_in_in.send(room_msg).is_err() {
+        if delay_in_in.send(room_msg).await.is_err() {
             break "방 닫힘";
         }
     };
@@ -148,7 +151,9 @@ pub async fn handle(socket: WebSocket, app: AppState, lag: LagSpec, conn_id: u64
     drop(delay_in_in);
     let _ = forward.await;
     let _ = room.tx.send(RoomMsg::Leave { player }).await;
-    let _ = writer.await;
+    if !writer_done {
+        let _ = writer.await;
+    }
 }
 
 async fn join_room(
@@ -158,25 +163,39 @@ async fn join_room(
     out: mpsc::Sender<String>,
     conn_id: u64,
 ) -> Result<(RoomHandle, PlayerId), RejectReason> {
+    let rooms = app.rooms();
     for _ in 0..JOIN_ATTEMPTS {
-        let handle = {
-            let rooms = app.rooms();
-            let mut rooms = rooms.lock().unwrap_or_else(|e| e.into_inner());
-            match rooms.get(code) {
-                Some(h) => h.clone(),
-                None => {
-                    // 방을 새로 만들 때마다 설정과 맵을 다시 읽어서, 고친 수치가 다음 방부터 적용되게 합니다.
-                    let setup = match app.load_setup() {
-                        Ok(s) => Arc::new(s),
-                        Err(e) => {
-                            crate::log!("[연결 {conn_id}] 방을 만들지 못했습니다: {e}");
-                            return Err(RejectReason::ServerError);
-                        }
-                    };
-                    let id = app.next_id();
-                    let h = spawn_room(code.to_string(), id, setup, id, app.rooms());
-                    rooms.insert(code.to_string(), h.clone());
-                    h
+        let existing = {
+            let rooms = rooms.lock().unwrap_or_else(|e| e.into_inner());
+            rooms.get(code).cloned()
+        };
+        let handle = match existing {
+            Some(h) => h,
+            None => {
+                // 방을 새로 만들 때마다 설정과 맵을 다시 읽어서, 고친 수치가 다음 방부터 적용되게 합니다.
+                // 파일 읽기는 /mnt/e에서 수백 ms가 걸릴 수 있어 락 밖, 블로킹 전용 스레드에서 합니다.
+                let loader = app.clone();
+                let setup = match tokio::task::spawn_blocking(move || loader.load_setup()).await {
+                    Ok(Ok(s)) => Arc::new(s),
+                    Ok(Err(e)) => {
+                        crate::log!("[연결 {conn_id}] 방을 만들지 못했습니다: {e}");
+                        return Err(RejectReason::ServerError);
+                    }
+                    Err(e) => {
+                        crate::log!("[연결 {conn_id}] 설정을 읽는 작업이 실패했습니다: {e}");
+                        return Err(RejectReason::ServerError);
+                    }
+                };
+                let mut rooms = rooms.lock().unwrap_or_else(|e| e.into_inner());
+                // 읽는 사이에 다른 연결이 같은 방을 만들었으면 그 방에 들어갑니다.
+                match rooms.get(code) {
+                    Some(h) => h.clone(),
+                    None => {
+                        let id = app.next_id();
+                        let h = spawn_room(code.to_string(), id, setup, id, app.rooms());
+                        rooms.insert(code.to_string(), h.clone());
+                        h
+                    }
                 }
             }
         };

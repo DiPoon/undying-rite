@@ -7,7 +7,7 @@ pub mod interp;
 pub mod predict;
 pub mod render;
 
-use clock::{Playback, RateEstimator, ServerClock};
+use clock::{Playback, PlaybackParams, RateEstimator, RateParams, ServerClock};
 use interp::Interpolator;
 use predict::{PredictionStats, Predictor};
 use render::{Camera, DebugInfo, MapRender, RenderCharacter, RenderState, Status};
@@ -19,10 +19,10 @@ use shared::{BalanceConfig, Map, SimParams};
 use std::collections::{BTreeMap, VecDeque};
 
 const RECENT_ERROR_WINDOW_MS: f64 = 5000.0;
+/// 그릴 상태를 JSON으로 만들지 못했을 때의 마지막 대체값. `RenderState`의 모든 필드를 갖춥니다.
+const FALLBACK_RENDER_JSON: &str = r#"{"status":"error","reject":null,"error":"render_json 실패","map_rev":0,"room":null,"camera":null,"characters":[],"debug":{"rtt_ms":null,"server_tick":null,"render_delay_ms":null,"pending_inputs":0,"seq":0,"ack":0,"last_error_cm":0.0,"recent_max_error_cm":0.0,"visual_offset_cm":0.0,"snaps":0,"interp_starved_pct":0.0,"recent_starved_pct":0.0,"arrival_spread_ms":0.0,"interp_margin_ms":null,"server_tick_rate":0.0,"fps":0.0}}"#;
 /// 최근 보간 멈춤 비율을 내는 이동 평균의 시간 상수
 const RECENT_STARVED_MS: f64 = 5000.0;
-/// 프레임 사이 간격이 이보다 길면(탭이 숨겨졌다 돌아온 경우 등) 그 사이의 시간은 버립니다.
-const MAX_FRAME_GAP_MS: f64 = 1000.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JoinError {
@@ -229,6 +229,18 @@ impl Client {
             }
         };
         let params = SimParams::from_config(&cfg);
+        let cl = &cfg.client;
+        let playback = Playback::new(PlaybackParams {
+            arrival_window_ms: cl.interp_arrival_window * 1000.0,
+            rate_adjust: cl.interp_rate_adjust,
+            starved_slowdown: cl.interp_starved_slowdown,
+            snap_ticks: params.seconds_to_ticks(cl.interp_snap),
+        });
+        let rate = RateEstimator::new(RateParams {
+            window_ms: cl.rate_window * 1000.0,
+            min_span_ms: cl.rate_min_span * 1000.0,
+            max_deviation: cl.rate_max_deviation,
+        });
         self.session = Some(Session {
             player_id,
             room,
@@ -238,12 +250,12 @@ impl Client {
             map,
             predictor: Predictor::default(),
             remote: Interpolator::default(),
-            playback: Playback::default(),
+            playback,
             clock: ServerClock::default(),
             roster: BTreeMap::new(),
             last_ping_ms: None,
             accum_ticks: 0.0,
-            rate: RateEstimator::default(),
+            rate,
             last_state_tick: None,
             last_ack: 0,
             last_input: CharacterInput::default(),
@@ -308,7 +320,20 @@ impl Client {
 
     pub fn render_json(&mut self) -> String {
         let rs = self.render_state();
-        protocol::encode(&rs).unwrap_or_else(|e| format!(r#"{{"status":"error","error":"{e}"}}"#))
+        protocol::encode(&rs).unwrap_or_else(|e| {
+            // 그리는 쪽이 모든 필드를 읽으므로, 실패해도 같은 모양의 올바른 JSON을 돌려줍니다.
+            let fallback = RenderState {
+                status: Status::Error,
+                reject: None,
+                error: Some(format!("그릴 상태를 만들지 못했습니다: {e}")),
+                map_rev: self.map_rev,
+                room: None,
+                camera: None,
+                characters: Vec::new(),
+                debug: DebugInfo::default(),
+            };
+            protocol::encode(&fallback).unwrap_or_else(|_| FALLBACK_RENDER_JSON.to_string())
+        })
     }
 
     pub fn map_render(&self) -> Option<MapRender> {
@@ -418,7 +443,8 @@ impl Session {
             }
         }
 
-        if self.predictor.is_active() && dt <= MAX_FRAME_GAP_MS {
+        // 프레임 사이가 너무 길면(탭이 숨겨졌다 돌아온 경우 등) 그 사이의 시간은 예측에 쓰지 않고 버립니다.
+        if self.predictor.is_active() && dt <= self.cfg.client.max_frame_gap * 1000.0 {
             // 명목 틱레이트가 아니라 서버 틱이 이 시계로 실제로 가는 속도로 진행합니다.
             self.accum_ticks += dt * self.ticks_per_ms();
             let max_ticks = self.cfg.client.max_catchup_ticks;
@@ -599,5 +625,23 @@ impl Session {
         } else {
             self.remote.starved_frames as f64 * 100.0 / self.remote.frames as f64
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fallback_render_json_has_every_field_of_render_state() {
+        let normal: serde_json::Value =
+            serde_json::from_str(&protocol::encode(&Client::new().render_state()).unwrap())
+                .unwrap();
+        let fallback: serde_json::Value = serde_json::from_str(FALLBACK_RENDER_JSON).unwrap();
+        let keys = |v: &serde_json::Value| -> Vec<String> {
+            v.as_object().unwrap().keys().cloned().collect()
+        };
+        assert_eq!(keys(&normal), keys(&fallback));
+        assert_eq!(keys(&normal["debug"]), keys(&fallback["debug"]));
     }
 }

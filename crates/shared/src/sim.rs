@@ -213,7 +213,7 @@ pub enum RoundError {
 }
 
 pub fn create_round(
-    _cfg: &BalanceConfig,
+    cfg: &BalanceConfig,
     map: &Map,
     seed: u64,
     players: &[PlayerId],
@@ -224,7 +224,7 @@ pub fn create_round(
         characters: Vec::new(),
     };
     for &id in players {
-        add_character(&mut state, map, id)?;
+        add_character(&mut state, cfg, map, id)?;
     }
     Ok(state)
 }
@@ -234,7 +234,13 @@ fn tile_center(p: TilePos) -> Vec2 {
 }
 
 /// 아무도 서 있지 않은 첫 생존자 시작 지점에 캐릭터를 놓습니다. 모두 차 있으면 첫 지점에 놓습니다.
-pub fn add_character(state: &mut RoundState, map: &Map, id: PlayerId) -> Result<(), RoundError> {
+/// 다른 캐릭터가 `respawn.occupied_distance` 안에 있으면 그 지점은 차 있다고 봅니다.
+pub fn add_character(
+    state: &mut RoundState,
+    cfg: &BalanceConfig,
+    map: &Map,
+    id: PlayerId,
+) -> Result<(), RoundError> {
     let idx = match state.characters.binary_search_by_key(&id, |c| c.id) {
         Ok(_) => return Err(RoundError::AlreadyPresent),
         Err(i) => i,
@@ -248,7 +254,12 @@ pub fn add_character(state: &mut RoundState, map: &Map, id: PlayerId) -> Result<
     let free = spawns
         .iter()
         .copied()
-        .find(|s| state.characters.iter().all(|c| c.pos.distance(*s) >= 1.0))
+        .find(|s| {
+            state
+                .characters
+                .iter()
+                .all(|c| c.pos.distance(*s) >= cfg.respawn.occupied_distance)
+        })
         .unwrap_or(first);
     state.characters.insert(
         idx,
