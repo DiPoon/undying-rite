@@ -1,0 +1,7 @@
+# 빌드 산출물 (target은 WSL 홈을 가리키는 심볼릭 링크)
+/target
+node_modules/
+/var/
+/web/dist/
+/web/src/wasm/
+*.log

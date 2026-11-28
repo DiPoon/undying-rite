@@ -1,0 +1,24 @@
+[workspace]
+resolver = "3"
+members = ["crates/shared", "crates/client-core", "crates/client-wasm", "crates/server", "crates/tools"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# 바깥에서 들어온 값 때문에 패닉하지 않도록, 규칙·클라이언트 코드에서 unwrap/expect를 막습니다.
+unwrap_used = "deny"
+expect_used = "deny"
+
+[profile.dev.package."*"]
+# 의존성만 최적화해서 디버그 빌드의 서버·테스트 클라이언트가 실제 속도에 가깝게 돌게 합니다.
+opt-level = 2
+
+[profile.release]
+# 산출물 크기보다 컴파일 시간을 우선합니다. wasm 크기 최적화는 필요해지면 합니다.
+codegen-units = 16

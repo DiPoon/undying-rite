@@ -41,6 +41,8 @@
 - 처음 하는 빌드와 `npm install`은 몇 분 걸릴 수 있으니 제한 시간을 10분으로 잡고, 멈춘 것으로 오해해 중단하지 않습니다.
 - Windows 쪽 편집기로 고친 파일은 파일 감시에 잡히지 않습니다. WSL 쪽에서 고친 파일은 잡힙니다.
 - 서버나 개발 서버처럼 끝나지 않는 프로세스는 백그라운드로 띄우고, 확인이 끝나면 종료합니다.
+- Windows 쪽이 바쁘면 WSL 가상 머신이 CPU를 거의 받지 못하는데, WSL 안의 `top`에는 유휴로 보입니다. 화면 없는 시험이 `[경고] 이 실행 동안 프로세스가 CPU를 제때 받지 못했습니다`를 내면 그 실행의 예측 오차 판정은 믿지 말고, `python3 -c 'sum(range(30_000_000))'`이 1~2초 안에 끝나는지 확인한 뒤 다시 돌립니다.
+- WSL의 시계는 Windows 시계보다 2.5~3.4% 느리게 갑니다. 브라우저(Windows)와 서버(WSL)의 틱 속도가 다르다는 뜻이고, `client-core`가 서버 틱 속도를 재서 맞춥니다.
 - 그 밖의 측정값은 `architecture.md` 7절에 있습니다.
 
 ## 보고
@@ -49,4 +51,21 @@
 
 ## 명령어
 
-(M0에서 저장소 뼈대를 만든 뒤 이 절을 채웁니다: 환경 준비, 서버 실행, 브라우저 껍데기 실행, 전체 검사, 화면 없는 라운드, 지연 주입 방법)
+모두 저장소 루트에서 실행합니다. 이 세션의 셸에 `cargo`가 잡히지 않으면 `export PATH="$HOME/.cargo/bin:$PATH"`를 먼저 합니다(스크립트들은 스스로 합니다).
+
+| 할 일 | 명령 |
+|---|---|
+| 환경 준비 (처음 한 번, 여러 번 해도 됨) | `bash scripts/setup.sh` — `target`을 `~/.cache/undying-rite/target`으로 잇는 링크, 툴체인, `wasm-bindgen-cli`(Cargo.lock과 같은 버전), `npm ci` |
+| 전체 검사 (보고 전에 반드시) | `bash scripts/check.sh` (3~5분. 작업 중에는 `--quick`으로 화면 없는 시험을 10초로 줄일 수 있지만 보고에는 전체 결과를 씀) |
+| 서버 + 브라우저 껍데기 실행 | `bash scripts/run.sh` → `http://127.0.0.1:8080/` (wasm과 `web/dist`를 빌드한 뒤 서버를 띄움, Ctrl+C로 끝냄) |
+| 서버만 실행 | `cargo run -p server -- --help` (옵션: `--bind`, `--static`, `--config`, `--map`, `--lag-ms`, `--jitter-ms`) |
+| 브라우저 껍데기 개발 서버 | 서버를 띄운 채 `npm --prefix web run dev` → `http://localhost:5173/` (`/ws`는 8080으로 넘어감. Windows 편집기로 고친 파일까지 감시하려면 `UR_POLL=1`) |
+| WebAssembly만 다시 빌드 | `bash scripts/build-wasm.sh` (`web/src/wasm/`에 씀) |
+| 화면 없는 시험 | `cargo run -q -p tools -- soak [--clients 4] [--lag-ms 150] [--jitter-ms 30] [--secs 60]` — 서버를 프로세스 안에 띄우고 테스트 클라이언트로 예측 오차, 서버 틱 분포, 입력 두 배 클라이언트, 시계가 다른 클라이언트를 확인. 실패하면 종료 코드 1 |
+| 떠 있는 서버에 봇 넣기 | `cargo run -q -p tools -- bots --url ws://127.0.0.1:8080/ws --room 방코드 [--clients 2] [--secs 600]` |
+| 결정론 확인 | `cargo run -q -p tools -- determinism` 과 `node scripts/wasm-determinism.mjs 20261127 3000` 의 출력이 같아야 함 |
+| 브라우저 경로 연기 시험 | 서버를 띄운 뒤 `node scripts/wasm-smoke.mjs http://127.0.0.1:8080` (`check.sh`가 빈 포트로 자동 실행) |
+
+**지연 주입:** 브라우저 주소에 `?lag=150&jitter=30`을 붙이면 그 연결만 왕복 150ms ± 30ms가 됩니다(서버가 보내고 받는 쪽을 각각 절반씩 늦춤). `?room=ABC&name=가&join=1`을 함께 주면 입장 화면을 건너뜁니다. 주소에 지정하지 않은 연결 전체의 기본값은 서버 옵션 `--lag-ms`, `--jitter-ms`입니다.
+
+**수치 바꾸기:** `config/balance.toml`을 고치면 다음에 새로 만들어지는 방부터 적용됩니다(서버 재시작 불필요). 값이 허용 범위를 벗어나면 방을 만들지 않고 서버 로그에 어느 값이 왜 틀렸는지 적습니다. 단, `[net]`의 연결 제한값(`max_message_bytes`, `max_messages_per_second`, `message_burst`, `send_queue_max`, `write_timeout`, `join_timeout`)은 방에 들어가기 전부터 쓰여서 서버를 띄울 때 한 번만 읽으므로, 바꾸려면 서버를 다시 띄워야 합니다.
